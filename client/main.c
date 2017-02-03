@@ -45,6 +45,39 @@ pid_t daemonize() {
     return process_id;
 }
 
+int connect_socket(const char* address, const char* port) {
+    int sockfd = -1;
+    struct addrinfo hints, *servinfo, *p;
+    int rv;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if ((rv = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
+        fprintf(stderr, "error: getaddrinfo %s\n", gai_strerror(rv));
+
+        exit(EXIT_FAILURE);
+    }
+
+    for (p = servinfo; p != NULL; p = p->ai_next) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            continue;
+        }
+
+        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            continue;
+        }
+
+        break;
+    }
+
+    freeaddrinfo(servinfo);
+
+    return sockfd;
+}
+
 int main(int argc, char* argv[])
 {
     if (argc != 2 && argc != 3)
@@ -53,52 +86,11 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    unsigned short port = 8888;
+    const char* port = argc == 3 ? argv[2] : "8888";
 
-    if (argc == 3) {
-        port = atoi(argv[2]);
-    }
+    int sockfd = -1;
 
-    if (port == 0) {
-        fprintf(stderr, "error: invalid port\n");
-        exit(EXIT_FAILURE);
-    }
-
-    char protoname[] = "tcp";
-    struct protoent *protoent = getprotobyname(protoname);
-    if (protoent == NULL) {
-        fprintf(stderr, "error: getprotobyname\n");
-        exit(EXIT_FAILURE);
-    }
-
-    int sockfd = socket(AF_INET, SOCK_STREAM, protoent->p_proto);
-    if (sockfd == -1) {
-        fprintf(stderr, "error: could not create socket\n");
-        exit(EXIT_FAILURE);
-    }
-
-    struct sockaddr_in serv_addr;
-
-    memset(&serv_addr, '0', sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port);
-
-    struct hostent *hostent = gethostbyname(argv[1]);
-    if (hostent == NULL) {
-        fprintf(stderr, "error: gethostbyname(\"%s\")\n", argv[1]);
-
-        exit(EXIT_FAILURE);
-    }
-
-    in_addr_t in_addr = inet_addr(inet_ntoa(*(struct in_addr*)*(hostent->h_addr_list)));
-    if (in_addr == (in_addr_t)-1) {
-        fprintf(stderr, "error: inet_addr(\"%s\")\n", *(hostent->h_addr_list));
-        exit(EXIT_FAILURE);
-    }
-
-    serv_addr.sin_addr.s_addr = in_addr;
-
-    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    if ((sockfd = connect_socket(argv[1], port)) < 0)
     {
        fprintf(stderr, "error: connect failed\n");
        return EXIT_FAILURE;
