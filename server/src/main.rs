@@ -2,8 +2,11 @@ use std::net::{TcpListener, TcpStream};
 use std::io::Read;
 use std::process;
 use std::{thread, time};
-use std::process::{Command};
+use std::process::{Command, Child};
 use std::sync::{Arc, Mutex, Condvar};
+use std::cell::UnsafeCell;
+use std::ptr;
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
 
 extern crate getopts;
@@ -43,6 +46,21 @@ fn shutdown(pair: &(Mutex<bool>, Condvar)) {
     cvar.notify_one();
 }
 
+macro_rules! desync {
+    ($target:ident, $var:ident, $body:expr) => (
+        let reference = $target.value.get();
+        let mut $var = unsafe { ptr::read(reference) };
+        $body
+        mem::forget($var);
+    );
+}
+
+pub struct SyncWrapper {
+    pub value: UnsafeCell<Child>,
+}
+
+unsafe impl Sync for SyncWrapper { }
+
 fn main() {
     log::set_logger(|max_log_level| {
         max_log_level.set(LogLevelFilter::Info);
@@ -75,20 +93,31 @@ fn main() {
         return;
     };
 
-    info!("command: {}", commandString);
+    info!("command: {}", command_string);
 
     let listener = TcpListener::bind(("0.0.0.0", port)).expect("Failed to start server");
 
-    let mut command = Command::new("sh")
+    let child = Command::new("sh")
         .arg("-c")
         .arg(command_string)
         .spawn()
         .expect("Failed to start process");
 
-    info!("Background command started");
+    let wait_wrapper = Arc::new(SyncWrapper { value: UnsafeCell::new(child) });
+    let kill_wrapper = wait_wrapper.clone();
 
     let wait_pair = Arc::new((Mutex::new(false), Condvar::new()));
     let notify_pair = wait_pair.clone();
+    let premature_pair = wait_pair.clone();
+
+    thread::spawn(move || {
+        desync!(wait_wrapper, command, {
+            command.wait().expect("failed to wait for command");
+            shutdown(&*premature_pair);
+        });
+    });
+
+    info!("Background command started");
 
     thread::spawn(move || {
         let &(ref lock, ref cvar) = &*wait_pair;
@@ -97,10 +126,14 @@ fn main() {
             terminating = cvar.wait(terminating).unwrap();
         }
 
-        command.kill().expect("Failed to kill command");
-        command.wait().expect("Command complete");
-
-        info!("Command killed");
+        desync!(kill_wrapper, command, {
+            match command.kill() {
+                Ok(_) => match command.wait() {
+                    _ => info!("Command terminated.")
+                },
+                Err(e) => error!("Kill failed: {}", e)
+            }
+        });
 
         process::exit(0);
     });
@@ -113,7 +146,7 @@ fn main() {
         thread::sleep(time::Duration::from_secs(grace));
 
         if GLOBAL_CLIENT_COUNT.load(Ordering::Relaxed) == 0 {
-            info!("Timeout hit.");
+            info!("Grace period expired.");
 
             shutdown(&*timeout_pair);
         }

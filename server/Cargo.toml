@@ -6,3 +6,7 @@ authors = ["Simon Engledew <simon.engledew@gmail.com>"]
 [dependencies]
 log = "0.3.6"
 getopts = "0.2"
+
+[profile.release]
+lto = true
+panic = 'abort'
