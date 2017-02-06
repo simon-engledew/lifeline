@@ -1,0 +1,8 @@
+[package]
+name = "lifeline_server"
+version = "0.1.0"
+authors = ["Simon Engledew <simon.engledew@gmail.com>"]
+
+[dependencies]
+log = "0.3.6"
+getopts = "0.2"
