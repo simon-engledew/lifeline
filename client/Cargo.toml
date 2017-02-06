@@ -1,10 +1,10 @@
 [package]
-name = "lifeline-server"
+name = "lifeline-client"
 version = "0.1.0"
 authors = ["Simon Engledew <simon.engledew@gmail.com>"]
 
 [dependencies]
-log = "0.3.6"
+libc = "0.2"
 getopts = "0.2"
 
 [profile.release]

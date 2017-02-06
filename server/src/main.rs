@@ -153,6 +153,8 @@ fn main() {
     });
 
     fn handle_client(mut stream: TcpStream, pair: Arc<(Mutex<bool>, Condvar)>) {
+        info!("Client connected");
+
         GLOBAL_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
         let mut buffer = [0; 1];
@@ -165,10 +167,14 @@ fn main() {
 
         GLOBAL_CLIENT_COUNT.fetch_sub(1, Ordering::Relaxed);
 
-        if GLOBAL_CLIENT_COUNT.load(Ordering::Relaxed) == 0 {
+        let count = GLOBAL_CLIENT_COUNT.load(Ordering::Relaxed);
+
+        if count == 0 {
             info!("Last client disconnected.");
 
             shutdown(&*pair);
+        } else {
+            info!("clients: {}", count);
         }
     };
 
